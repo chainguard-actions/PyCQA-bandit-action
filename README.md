@@ -9,6 +9,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | Version | Tag | Upstream commit |
 |---------|-----|-----------------|
 | v1.0.0 | [`v1.0.0`](https://github.com/chainguard-actions/PyCQA-bandit-action/tree/v1.0.0) | [`8a1b306`](https://github.com/PyCQA/bandit-action/commit/8a1b30610f61f3f792fe7556e888c9d7dffa52de) |
+| v1.0.1 | [`v1.0.1`](https://github.com/chainguard-actions/PyCQA-bandit-action/tree/v1.0.1) | [`67a458d`](https://github.com/PyCQA/bandit-action/commit/67a458d90fa11fb1463e91e7f4c8f068b5863c7f) |
 
 ## Privacy
 
