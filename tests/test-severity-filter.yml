@@ -1,0 +1,92 @@
+name: Test bandit scan with severity filter
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create Python file with mixed severity issues
+        run: |
+          mkdir -p /tmp/severity_test_code
+          cat > /tmp/severity_test_code/mixed.py << 'EOF'
+          import subprocess
+          import hashlib
+
+          # B602: HIGH severity - subprocess with shell=True
+          def run_cmd(cmd):
+              subprocess.call(cmd, shell=True)
+
+          # B324: MEDIUM severity - use of weak MD5 hash
+          def weak_hash(data):
+              return hashlib.md5(data).hexdigest()
+
+          if __name__ == "__main__":
+              run_cmd("ls")
+              print(weak_hash(b"test"))
+          EOF
+
+      - name: Run bandit with all severities to get baseline
+        run: |
+          pip install bandit[sarif,toml] -q
+          bandit -r /tmp/severity_test_code -f sarif -o /tmp/all_severity.sarif || true
+          ALL=$(python3 -c "
+          import json
+          with open('/tmp/all_severity.sarif') as f:
+              data = json.load(f)
+          runs = data.get('runs', [])
+          total = sum(len(r.get('results', [])) for r in runs)
+          print(total)
+          " 2>/dev/null || echo "0")
+          echo "all severity findings: $ALL"
+          echo "ALL_COUNT=$ALL" >> $GITHUB_ENV
+
+      - id: action
+        uses: .
+        with:
+          targets: /tmp/severity_test_code
+          severity: high
+        continue-on-error: true
+
+      - name: Assert bandit produced results.sarif
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+
+      - name: Assert high severity filter reduces findings
+        env:
+          ALL: ${{ env.ALL_COUNT }}
+        run: |
+          HIGH_COUNT=$(python3 -c "
+          import json
+          with open('results.sarif') as f:
+              data = json.load(f)
+          runs = data.get('runs', [])
+          total = sum(len(r.get('results', [])) for r in runs)
+          print(total)
+          " 2>/dev/null || echo "0")
+          echo "all severity findings: $ALL"
+          echo "high severity only findings: $HIGH_COUNT"
+          if [ "$ALL" -gt 0 ] && [ "$HIGH_COUNT" -ge "$ALL" ]; then
+            echo "FAIL: expected fewer findings with high severity filter ($HIGH_COUNT >= $ALL)"
+            exit 1
+          fi
+          echo "PASS: severity filter reduced findings from $ALL to $HIGH_COUNT"
+
+      - name: Assert action outcome (upload-sarif may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action succeeded"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (upload-sarif fails on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

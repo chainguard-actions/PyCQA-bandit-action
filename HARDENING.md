@@ -8,7 +8,7 @@
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
-**Harden Agent Version:** `1`
+**Harden Agent Version:** `2`
 
 Action **PyCQA--bandit-action/v1.0.1** was hardened automatically. 2 finding(s) were identified and resolved across 1 iteration(s).
 
@@ -16,34 +16,27 @@ Action **PyCQA--bandit-action/v1.0.1** was hardened automatically. 2 finding(s) 
 
 ### unpinned-uses (severity: high)
 
-Three `uses:` references in action.yml use mutable version tags instead of pinned 40-character SHA digests, making the action vulnerable to supply-chain attacks if the upstream tag is moved or compromised:
-- `actions/setup-python@v5` (line 64)
-- `actions/checkout@v4` (line 69)
-- `github/codeql-action/upload-sarif@v3` (line 119)
-Each should be pinned to a full commit SHA, e.g. `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4`.
+Three `uses:` references in action.yml use mutable version tags instead of pinned 40-character SHA commit hashes, making the action vulnerable to supply-chain attacks if those tags are moved:
+- `uses: actions/setup-python@v5` (line 72)
+- `uses: actions/checkout@v4` (line 78)
+- `uses: github/codeql-action/upload-sarif@v3` (line 127)
+Each should be pinned to a full SHA, e.g. `actions/setup-python@<40-hex-sha> # v5`.
 
 Locations:
 
-- `action.yml:64`
-- `action.yml:69`
-- `action.yml:119`
+- `action.yml:72`
+- `action.yml:78`
+- `action.yml:127`
 
 ### script-injection (severity: high)
 
-Sub-rule (b) violation: The 'Run Bandit' step maps all `inputs.*` values into env vars (e.g. `INPUT_CONFIGFILE: ${{ inputs.configfile }}`) and then expands those env vars **unquoted** throughout the shell script. Unquoted expansions allow shell metacharacters (`;`, `|`, `&`, `$(...)`, whitespace, glob chars) embedded in user-supplied input to be interpreted by the shell.
-
-Specific unquoted expansions in intermediate assignments:
-  `CONFIGFILE="-c $INPUT_CONFIGFILE"` — $INPUT_CONFIGFILE unquoted inside double-quotes but then $CONFIGFILE itself is unquoted at use
-  `PROFILE="-p $INPUT_PROFILE"`, `TESTS="-t $INPUT_TESTS"`, `SKIPS="-s $INPUT_SKIPS"`, etc.
-
-Final command line (line 107) uses all variables unquoted:
-  `bandit $CONFIGFILE $PROFILE $TESTS $SKIPS $SEVERITY $CONFIDENCE -x $INPUT_EXCLUDE $BASELINE $INI -r $INPUT_TARGETS -f sarif -o results.sarif || true`
-
-All of `$CONFIGFILE`, `$PROFILE`, `$TESTS`, `$SKIPS`, `$SEVERITY`, `$CONFIDENCE`, `$INPUT_EXCLUDE`, `$BASELINE`, `$INI`, and `$INPUT_TARGETS` are unquoted and hold user-controlled input values.
+Rule (b) violation: The 'Run Bandit' step constructs intermediate shell variables (`CONFIGFILE`, `PROFILE`, `TESTS`, `SKIPS`, `SEVERITY`, `CONFIDENCE`, `BASELINE`, `INI`) by embedding `$INPUT_*` env vars (sourced from `inputs.*`) without quoting, and then passes all of them unquoted to the `bandit` command:
+  `bandit $CONFIGFILE $PROFILE $TESTS $SKIPS $SEVERITY $CONFIDENCE -x $INPUT_EXCLUDE $BASELINE $INI -r $INPUT_TARGETS ...`
+Because the shell expands these variables without double-quotes, an attacker-controlled input value containing shell metacharacters (`;`, `|`, `&`, `$(...)`, etc.) can break out of the intended argument context and execute arbitrary commands. All of `$CONFIGFILE`, `$PROFILE`, `$TESTS`, `$SKIPS`, `$SEVERITY`, `$CONFIDENCE`, `$INPUT_EXCLUDE`, `$BASELINE`, `$INI`, and `$INPUT_TARGETS` must be double-quoted at the point of use.
 
 Locations:
 
-- `action.yml:107`
+- `action.yml:113`
 
 ## Iteration Notes
 
@@ -53,5 +46,5 @@ Locations:
 
 **Notes:**
 
-Fixed three unpinned `uses:` references by pinning them to full SHA digests: actions/setup-python@v5 → @a26af69be951a213d495a4c3e4e4022e16d87065, actions/checkout@v4 → @34e114876b0b11c390a56381ad16ebd13914f8d5, github/codeql-action/upload-sarif@v3 → @dd903d2e4f5405488e5ef1422510ee31c8b32357. Fixed script-injection by replacing the unquoted variable expansions in the bandit command with a bash array (BANDIT_ARGS) where each flag and user-supplied value is added as a separately double-quoted array element, then invoked as `bandit "${BANDIT_ARGS[@]}"`. This ensures shell metacharacters in user-controlled inputs cannot be interpreted by the shell.
+Fixed all three unpinned `uses:` references by pinning them to their full 40-character SHA hashes (with the original tag preserved as a comment). Fixed the script-injection vulnerability in the 'Run Bandit' step by replacing string variables that packed flag+value pairs (which required unquoted expansion) with a bash array. Each optional flag and its value are now appended as separate quoted array elements, and the final bandit invocation uses `"${args[@]}"` for safe expansion. `$INPUT_EXCLUDE` and `$INPUT_TARGETS` are also double-quoted at the point of use.
 

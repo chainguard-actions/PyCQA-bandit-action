@@ -1,0 +1,75 @@
+name: Test bandit scan on code with security issues
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create Python file with known security issues
+        run: |
+          mkdir -p /tmp/insecure_code
+          cat > /tmp/insecure_code/insecure.py << 'EOF'
+          import subprocess
+          import os
+
+          # B602: subprocess call with shell=True
+          def run_cmd(cmd):
+              subprocess.call(cmd, shell=True)
+
+          # B108: hardcoded temp file
+          def write_temp():
+              with open('/tmp/myfile', 'w') as f:
+                  f.write("data")
+
+          if __name__ == "__main__":
+              run_cmd("ls")
+              write_temp()
+          EOF
+
+      - id: action
+        uses: .
+        with:
+          targets: /tmp/insecure_code
+        continue-on-error: true
+
+      - name: Assert bandit produced results.sarif
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+
+      - name: Assert SARIF contains findings for insecure code
+        run: |
+          # The SARIF file should contain results (findings) for the insecure code
+          RESULTS_COUNT=$(python3 -c "
+          import json
+          with open('results.sarif') as f:
+              data = json.load(f)
+          runs = data.get('runs', [])
+          total = sum(len(r.get('results', [])) for r in runs)
+          print(total)
+          " 2>/dev/null || echo "0")
+          echo "findings count: $RESULTS_COUNT"
+          if [ "$RESULTS_COUNT" -eq 0 ]; then
+            echo "FAIL: expected bandit to find security issues but found none"
+            exit 1
+          fi
+          echo "PASS: bandit found $RESULTS_COUNT issue(s) as expected"
+
+      - name: Assert action outcome (upload-sarif may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action succeeded"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (upload-sarif fails on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

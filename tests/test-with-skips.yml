@@ -1,0 +1,87 @@
+name: Test bandit scan with skipped test IDs
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create Python file with known security issues
+        run: |
+          mkdir -p /tmp/skip_test_code
+          cat > /tmp/skip_test_code/insecure.py << 'EOF'
+          import subprocess
+
+          # B602: subprocess call with shell=True - this will be skipped
+          def run_cmd(cmd):
+              subprocess.call(cmd, shell=True)
+
+          if __name__ == "__main__":
+              run_cmd("ls")
+          EOF
+
+      - name: Run bandit without skips to get baseline count
+        run: |
+          pip install bandit[sarif,toml] -q
+          bandit -r /tmp/skip_test_code -f sarif -o /tmp/baseline.sarif || true
+          BASELINE=$(python3 -c "
+          import json
+          with open('/tmp/baseline.sarif') as f:
+              data = json.load(f)
+          runs = data.get('runs', [])
+          total = sum(len(r.get('results', [])) for r in runs)
+          print(total)
+          " 2>/dev/null || echo "0")
+          echo "baseline findings: $BASELINE"
+          echo "BASELINE_COUNT=$BASELINE" >> $GITHUB_ENV
+
+      - id: action
+        uses: .
+        with:
+          targets: /tmp/skip_test_code
+          # Skip B602 (subprocess with shell=True) and B108 (hardcoded tmp)
+          skips: B602,B108
+        continue-on-error: true
+
+      - name: Assert bandit produced results.sarif
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+
+      - name: Assert skipped tests reduce findings
+        env:
+          BASELINE: ${{ env.BASELINE_COUNT }}
+        run: |
+          SKIPPED_COUNT=$(python3 -c "
+          import json
+          with open('results.sarif') as f:
+              data = json.load(f)
+          runs = data.get('runs', [])
+          total = sum(len(r.get('results', [])) for r in runs)
+          print(total)
+          " 2>/dev/null || echo "0")
+          echo "baseline findings: $BASELINE"
+          echo "findings with skips: $SKIPPED_COUNT"
+          if [ "$SKIPPED_COUNT" -ge "$BASELINE" ] && [ "$BASELINE" -gt 0 ]; then
+            echo "FAIL: expected fewer findings with skips ($SKIPPED_COUNT >= $BASELINE)"
+            exit 1
+          fi
+          echo "PASS: skips reduced findings from $BASELINE to $SKIPPED_COUNT"
+
+      - name: Assert action outcome (upload-sarif may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action succeeded"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (upload-sarif fails on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
