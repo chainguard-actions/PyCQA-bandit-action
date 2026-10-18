@@ -1,10 +1,12 @@
 name: Bandit by PyCQA
 description: The official Bandit Action developed by PyCQA
 author: '@PyCQA'
+
 branding:
   icon: 'shield'
   color: 'black'
-inputs:
+
+inputs: 
   configfile:
     description: |
       Optional config file to use for selecting plugins and overriding defaults
@@ -64,6 +66,7 @@ inputs:
       Source file(s) or directory(s) to be tested
     required: true
     default: '.'
+
 runs:
   using: composite
   steps:
@@ -85,14 +88,17 @@ runs:
           -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
           "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
     - name: Set up Python 3.9
-      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      uses: chainguard-actions/actions-setup-python@ace3254bb5011efbd0650a7120a0441ebd1f9400 # v5
       with:
         python-version: 3.9
+
     - name: Install Bandit
       shell: bash
       run: pip install bandit[sarif,toml]
+
     - name: Checkout repository
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: chainguard-actions/actions-checkout@31bbccf724702f8a0dc7a3ed7db8fcca2066babc # v4
+
     - name: Run Bandit
       shell: bash
       run: |
@@ -121,7 +127,7 @@ runs:
         if [ "$INPUT_INI" != "DEFAULT" ]; then
             args+=(--ini "$INPUT_INI")
         fi
-        bandit "${args[@]}" -x "$INPUT_EXCLUDE" -r "$INPUT_TARGETS" -f sarif -o results.sarif || true
+        bandit "${args[@]}" -x $INPUT_EXCLUDE -r $INPUT_TARGETS -f sarif -o results.sarif || true
       env:
         INPUT_CONFIGFILE: ${{ inputs.configfile }}
         INPUT_PROFILE: ${{ inputs.profile }}
@@ -133,7 +139,8 @@ runs:
         INPUT_BASELINE: ${{ inputs.baseline }}
         INPUT_INI: ${{ inputs.ini }}
         INPUT_TARGETS: ${{ inputs.targets }}
+
     - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+      uses: github/codeql-action/upload-sarif@ce5e7eeac396d720fe2d802714996c8ce561e311 # v3
       with:
         sarif_file: results.sarif
