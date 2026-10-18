@@ -1,0 +1,66 @@
+name: Test Bandit scan with specific test IDs
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create a Python file with known security issues
+        run: |
+          mkdir -p tests/fixtures/python
+          cat > tests/fixtures/python/test_specific.py << 'EOF'
+          import subprocess
+          import random
+
+          # B602: subprocess call with shell=True
+          subprocess.call("ls -la", shell=True)
+
+          # B311: standard pseudo-random generators
+          token = random.random()
+
+          # B105: hardcoded password
+          password = "hunter2"
+          EOF
+
+      - id: action
+        uses: .
+        with:
+          targets: tests/fixtures/python
+          # Only run B311 (random) test
+          tests: B311
+        continue-on-error: true
+
+      - name: Assert SARIF file was produced
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+
+      - name: Assert only specified test ran (B602 and B105 should not appear)
+        run: |
+          # B602 and B105 should not appear since only B311 was requested
+          if grep -q '"B602"' results.sarif; then
+            echo "FAIL: B602 should not appear when only B311 was requested"
+            exit 1
+          fi
+          if grep -q '"B105"' results.sarif; then
+            echo "FAIL: B105 should not appear when only B311 was requested"
+            exit 1
+          fi
+          echo "PASS: only specified test IDs ran"
+
+      - name: Assert action ran (upload may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action ran (outcome=$OUTCOME; upload-sarif may fail on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

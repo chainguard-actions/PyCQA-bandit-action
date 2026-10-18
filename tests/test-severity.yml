@@ -1,0 +1,60 @@
+name: Test Bandit scan with severity filter
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create a Python file with mixed severity issues
+        run: |
+          mkdir -p tests/fixtures/python
+          cat > tests/fixtures/python/mixed_severity.py << 'EOF'
+          import subprocess
+          import random
+
+          # B602: HIGH severity - subprocess with shell=True
+          subprocess.call("ls -la", shell=True)
+
+          # B311: LOW severity - use of random for security
+          token = random.random()
+
+          # B105: LOW severity - hardcoded password
+          password = "secret123"
+          EOF
+
+      - id: action
+        uses: .
+        with:
+          targets: tests/fixtures/python
+          severity: high
+        continue-on-error: true
+
+      - name: Assert SARIF file was produced
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+
+      - name: Assert SARIF file is valid JSON
+        run: |
+          if ! python3 -c "import json, sys; json.load(open('results.sarif'))" 2>&1; then
+            echo "FAIL: results.sarif is not valid JSON"
+            exit 1
+          fi
+          echo "PASS: results.sarif is valid JSON"
+
+      - name: Assert action ran (upload may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action ran (outcome=$OUTCOME; upload-sarif may fail on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

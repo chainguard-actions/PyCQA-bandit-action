@@ -1,0 +1,62 @@
+name: Test Bandit scan with skips
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create a Python file with known security issues
+        run: |
+          mkdir -p tests/fixtures/python
+          cat > tests/fixtures/python/insecure.py << 'EOF'
+          import subprocess
+
+          # B602: subprocess call with shell=True
+          subprocess.call("ls -la", shell=True)
+
+          # B105: hardcoded password string
+          password = "hunter2"
+          EOF
+
+      - id: action
+        uses: .
+        with:
+          targets: tests/fixtures/python
+          # Skip B105 (hardcoded password) and B602 (subprocess shell=True)
+          skips: B105,B602
+        continue-on-error: true
+
+      - name: Assert SARIF file was produced
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+
+      - name: Assert skipped tests are not in SARIF results
+        run: |
+          # B105 and B602 should not appear in results since they were skipped
+          if grep -q '"B105"' results.sarif; then
+            echo "FAIL: B105 should have been skipped but appears in results"
+            exit 1
+          fi
+          if grep -q '"B602"' results.sarif; then
+            echo "FAIL: B602 should have been skipped but appears in results"
+            exit 1
+          fi
+          echo "PASS: skipped tests not found in results"
+
+      - name: Assert action ran (upload may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action ran (outcome=$OUTCOME; upload-sarif may fail on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

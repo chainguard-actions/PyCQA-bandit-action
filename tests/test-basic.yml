@@ -1,0 +1,72 @@
+name: Test basic Bandit scan
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create a Python file with known security issues
+        run: |
+          mkdir -p tests/fixtures/python
+          cat > tests/fixtures/python/insecure.py << 'EOF'
+          import subprocess
+          import os
+
+          # B602: subprocess call with shell=True
+          subprocess.call("ls -la", shell=True)
+
+          # B105: hardcoded password string
+          password = "hunter2"
+
+          # B311: standard pseudo-random generators not suitable for security/cryptographic purposes
+          import random
+          token = random.random()
+          EOF
+
+      - id: action
+        uses: .
+        with:
+          targets: tests/fixtures/python
+        continue-on-error: true
+
+      - name: Assert SARIF file was produced
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+          cat results.sarif | head -20
+
+      - name: Assert SARIF file is valid JSON
+        run: |
+          if ! python3 -c "import json, sys; json.load(open('results.sarif'))" 2>&1; then
+            echo "FAIL: results.sarif is not valid JSON"
+            exit 1
+          fi
+          echo "PASS: results.sarif is valid JSON"
+
+      - name: Assert SARIF contains expected schema
+        run: |
+          SCHEMA=$(python3 -c "import json; d=json.load(open('results.sarif')); print(d.get('\$schema',''))")
+          echo "schema: $SCHEMA"
+          if echo "$SCHEMA" | grep -qi "sarif"; then
+            echo "PASS: SARIF schema found"
+          else
+            echo "FAIL: expected SARIF schema in results.sarif"
+            exit 1
+          fi
+
+      - name: Assert action ran (upload may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action ran (outcome=$OUTCOME; upload-sarif may fail on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

@@ -1,0 +1,63 @@
+name: Test Bandit scan with exclude paths
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create Python files - one to scan, one to exclude
+        run: |
+          mkdir -p tests/fixtures/python/include_dir
+          mkdir -p tests/fixtures/python/exclude_dir
+
+          # File in include_dir - has issues, should be scanned
+          cat > tests/fixtures/python/include_dir/safe.py << 'EOF'
+          # This file has no security issues
+          def add(a, b):
+              return a + b
+          EOF
+
+          # File in exclude_dir - has issues but should be excluded
+          cat > tests/fixtures/python/exclude_dir/insecure.py << 'EOF'
+          import subprocess
+          # B602: subprocess call with shell=True
+          subprocess.call("ls -la", shell=True)
+          EOF
+
+      - id: action
+        uses: .
+        with:
+          targets: tests/fixtures/python
+          exclude: .svn,CVS,.bzr,.hg,.git,__pycache__,.tox,.eggs,*.egg,tests/fixtures/python/exclude_dir
+        continue-on-error: true
+
+      - name: Assert SARIF file was produced
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "FAIL: results.sarif was not produced"
+            exit 1
+          fi
+          echo "PASS: results.sarif exists"
+
+      - name: Assert excluded directory is not in results
+        run: |
+          # The exclude_dir should not appear in results
+          if grep -q 'exclude_dir' results.sarif; then
+            echo "FAIL: exclude_dir should have been excluded but appears in results"
+            exit 1
+          fi
+          echo "PASS: excluded directory not found in results"
+
+      - name: Assert action ran (upload may fail on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action ran (outcome=$OUTCOME; upload-sarif may fail on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
