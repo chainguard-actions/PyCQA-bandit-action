@@ -88,7 +88,7 @@ runs:
           -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
           "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
     - name: Set up Python 3.9
-      uses: chainguard-actions/actions-setup-python@ace3254bb5011efbd0650a7120a0441ebd1f9400 # v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
         python-version: 3.9
 
@@ -97,7 +97,7 @@ runs:
       run: pip install bandit[sarif,toml]
 
     - name: Checkout repository
-      uses: chainguard-actions/actions-checkout@31bbccf724702f8a0dc7a3ed7db8fcca2066babc # v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: Run Bandit
       shell: bash
@@ -121,13 +121,18 @@ runs:
         if [ "$INPUT_CONFIDENCE" != "DEFAULT" ]; then
             args+=(--confidence-level "$INPUT_CONFIDENCE")
         fi
+        args+=(-x "$INPUT_EXCLUDE")
         if [ "$INPUT_BASELINE" != "DEFAULT" ]; then
             args+=(-b "$INPUT_BASELINE")
         fi
         if [ "$INPUT_INI" != "DEFAULT" ]; then
             args+=(--ini "$INPUT_INI")
         fi
-        bandit "${args[@]}" -x $INPUT_EXCLUDE -r $INPUT_TARGETS -f sarif -o results.sarif || true
+        targets=()
+        if [ -n "$INPUT_TARGETS" ]; then
+            read -r -d '' -a targets <<< "$INPUT_TARGETS" || true
+        fi
+        bandit "${args[@]}" -r "${targets[@]}" -f sarif -o results.sarif || true
       env:
         INPUT_CONFIGFILE: ${{ inputs.configfile }}
         INPUT_PROFILE: ${{ inputs.profile }}
@@ -140,7 +145,7 @@ runs:
         INPUT_INI: ${{ inputs.ini }}
         INPUT_TARGETS: ${{ inputs.targets }}
 
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@ce5e7eeac396d720fe2d802714996c8ce561e311 # v3
+    - name: Upload SARIF
+      uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
       with:
         sarif_file: results.sarif

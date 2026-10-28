@@ -4,7 +4,7 @@
 
 > This file was generated automatically by the hardening agent.
 
-**Policy SHA:** `d636be7e43ef829af6e853da6b3c7566db9f72fe`
+**Policy SHA:** `374911c4be584df24e6da57af2d990570ef0f859`
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
@@ -16,28 +16,21 @@ Action **PyCQA--bandit-action/v1.0.1** was hardened automatically. 2 finding(s) 
 
 ### unpinned-uses (severity: high)
 
-Three `uses:` references in action.yml use mutable tags instead of pinned full 40-character SHA digests, making the action vulnerable to supply-chain attacks if the referenced tag is moved or overwritten:
-- `uses: actions/setup-python@v5` (line 74)
-- `uses: actions/checkout@v4` (line 83)
-- `uses: github/codeql-action/upload-sarif@v3` (line 121)
-Each should be pinned to a full commit SHA, e.g. `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4`.
+Composite action steps reference actions by mutable tags rather than full 40-char commit SHAs: `uses: actions/setup-python@v5` (line 74), `uses: actions/checkout@v4` (line 83), `uses: github/codeql-action/upload-sarif@v3` (line 142).
 
 Locations:
 
 - `action.yml:74`
 - `action.yml:83`
-- `action.yml:121`
+- `action.yml:142`
 
 ### script-injection (severity: high)
 
-Sub-rule (b) violation: The 'Run Bandit' step maps all `inputs.*` values into env vars (INPUT_CONFIGFILE, INPUT_PROFILE, INPUT_TESTS, INPUT_SKIPS, INPUT_SEVERITY, INPUT_CONFIDENCE, INPUT_EXCLUDE, INPUT_BASELINE, INPUT_INI, INPUT_TARGETS) via the `env:` block, but then expands them unquoted inside the `run:` shell script. Specifically:
-1. Intermediate variables are built with unquoted expansions, e.g. `CONFIGFILE="-c $INPUT_CONFIGFILE"` (line 91) — the value of INPUT_CONFIGFILE is not quoted, allowing glob expansion.
-2. The final `bandit` invocation (line 108) uses all intermediate variables and two direct env vars completely unquoted: `bandit $CONFIGFILE $PROFILE $TESTS $SKIPS $SEVERITY $CONFIDENCE -x $INPUT_EXCLUDE $BASELINE $INI -r $INPUT_TARGETS`. An attacker-controlled input containing shell metacharacters (`;`, `|`, `&`, `$(...)`, whitespace, globs) can break out of the intended argument context and inject arbitrary shell commands. All these variables should be double-quoted: `"$CONFIGFILE"`, `"$INPUT_EXCLUDE"`, `"$INPUT_TARGETS"`, etc.
+Sub-rule (b) violated in the 'Run Bandit' step: workflow-controlled input env vars are expanded without quotes. Offending line: `bandit $CONFIGFILE $PROFILE $TESTS $SKIPS $SEVERITY $CONFIDENCE -x $INPUT_EXCLUDE $BASELINE $INI -r $INPUT_TARGETS -f sarif -o results.sarif || true`. $INPUT_EXCLUDE and $INPUT_TARGETS (from inputs.exclude and inputs.targets) are unquoted. $CONFIGFILE, $PROFILE, $TESTS, $SKIPS, $SEVERITY, $CONFIDENCE, $BASELINE and $INI are built from inputs.* values (e.g. CONFIGFILE="-c $INPUT_CONFIGFILE") and are also expanded unquoted. Because of this, word splitting and glob expansion apply to input data. Pass each value as its own quoted argument, using the guarded form (e.g. ${INPUT_CONFIGFILE:+-c "$INPUT_CONFIGFILE"}) or a bash array.
 
 Locations:
 
-- `action.yml:91`
-- `action.yml:108`
+- `action.yml:128`
 
 ## Iteration Notes
 
@@ -47,13 +40,13 @@ Locations:
 
 **Notes:**
 
-Fixed three unpinned uses: references by pinning to full commit SHAs (actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065, actions/checkout@11d5960a326750d5838078e36cf38b85af677262, github/codeql-action/upload-sarif@ce5e7eeac396d720fe2d802714996c8ce561e311). Fixed script injection in the 'Run Bandit' step by replacing the pattern of building unquoted flag+value strings with a bash array approach: each optional flag and its value are appended to an `args=()` array as separate properly-quoted elements, and the final bandit invocation uses `"${args[@]}"` along with double-quoted `"$INPUT_EXCLUDE"` and `"$INPUT_TARGETS"` to prevent shell metacharacter injection.
+Pinned setup-python, checkout and codeql-action/upload-sarif to full commit SHAs, keeping the tag as a trailing comment. The Run Bandit step now builds the bandit command as a bash array. Each optional flag goes in as two separate items, the flag and its quoted value, and only when the input isn't 'DEFAULT'. That includes -c, -p, -t, -s, --severity-level, --confidence-level, -b and --ini. The exclude value is passed as a single quoted argument, so a pattern like *.egg goes straight to bandit and the shell no longer expands it. targets can hold several paths, so it is split on whitespace with read -r -d '' -a, which matches how upstream's unquoted $INPUT_TARGETS was split. That split is guarded so an empty value adds no argument. One behaviour change: targets are no longer glob-expanded by the shell, so a target like src/*.py is now passed to bandit as literal text. I haven't run the action to test these changes.
 
-### Iteration 1
+### Iteration 2
 
-**Fixes applied:** publish-gate
+**Fixes applied:** unpinned-uses
 
 **Notes:**
 
-Fixed action.yml line 113: changed `bandit "${args[@]}" -x "$INPUT_EXCLUDE" -r "$INPUT_TARGETS"` to `bandit "${args[@]}" -x $INPUT_EXCLUDE -r $INPUT_TARGETS`. The double-quoted variables were passing the entire exclude/targets values as single arguments, but upstream intended them to be word-split by the shell into multiple arguments (e.g., space-separated paths). Unquoted env variable expansion is safe here — it only word-splits and globs, it does not evaluate shell metacharacters like semicolons, pipes, or command substitutions.
+Fixed the broken last step of action.yml. It is now named 'Upload SARIF' and has its own key: `uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3`. The SHA was checked with lookup_action_sha.
 
