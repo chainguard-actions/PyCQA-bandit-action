@@ -121,13 +121,22 @@ runs:
         if [ "$INPUT_CONFIDENCE" != "DEFAULT" ]; then
             BANDIT_ARGS+=("--confidence-level" "$INPUT_CONFIDENCE")
         fi
+        EXCLUDE_ARGS=()
+        if [ -n "$INPUT_EXCLUDE" ]; then
+            read -r -d '' -a EXCLUDE_ARGS <<< "$INPUT_EXCLUDE" || true
+        fi
+        TARGET_ARGS=()
+        if [ -n "$INPUT_TARGETS" ]; then
+            read -r -d '' -a TARGET_ARGS <<< "$INPUT_TARGETS" || true
+        fi
+        POST_ARGS=()
         if [ "$INPUT_BASELINE" != "DEFAULT" ]; then
-            BANDIT_ARGS+=("-b" "$INPUT_BASELINE")
+            POST_ARGS+=("-b" "$INPUT_BASELINE")
         fi
         if [ "$INPUT_INI" != "DEFAULT" ]; then
-            BANDIT_ARGS+=("--ini" "$INPUT_INI")
+            POST_ARGS+=("--ini" "$INPUT_INI")
         fi
-        bandit "${BANDIT_ARGS[@]}" -x $INPUT_EXCLUDE -r $INPUT_TARGETS -f sarif -o results.sarif || true
+        bandit "${BANDIT_ARGS[@]}" -x "${EXCLUDE_ARGS[@]}" "${POST_ARGS[@]}" -r "${TARGET_ARGS[@]}" -f sarif -o results.sarif || true
       env:
         INPUT_CONFIGFILE: ${{ inputs.configfile }}
         INPUT_PROFILE: ${{ inputs.profile }}
@@ -141,6 +150,6 @@ runs:
         INPUT_TARGETS: ${{ inputs.targets }}
 
     - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@ce5e7eeac396d720fe2d802714996c8ce561e311 # v3
+      uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
       with:
         sarif_file: results.sarif
